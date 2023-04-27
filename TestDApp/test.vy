@@ -5,8 +5,24 @@
 # balanceOf: public(HashMap[address, uint256])
 # allowance: public(HashMap[address, HashMap[address, uint256]])
 
-import auctioninterface as Auction
-auction_instance : Auction
+# import auctioninterface as OpenAuction
+struct Auction:
+    beneficiary: address
+    auctionStart: uint256
+    auctionEnd: uint256
+    highestBidder: address
+    highestBid: uint256
+    ended: bool
+
+interface OpenAuction:
+    def startAuction(_NFTid: uint256): nonpayable
+    def bid(_NFTid: uint256): payable
+    def endAuction(_NFTid: uint256) -> address: nonpayable
+    def pendingReturns(arg0: uint256, arg1: address) -> uint256: view
+    def AuctionMap(arg0: uint256) -> Auction: view
+    def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
+
+#auction_instance : public(OpenAuction)
 
 totalFunds: public(uint256)
 fixedDepositMaturityPeriod: public(uint256)
@@ -67,7 +83,6 @@ def __init__():
     self.totalFunds = 0
     self.fixedDepositMaturityPeriod = 600
     self.NFTminter = msg.sender
-    self.auction_instance = Auction()
 
 @external
 @payable
@@ -151,13 +166,14 @@ def NFTMint() -> bool:
     self.NFTidToActualOwner[nftID] = self
     self.NFTidCtr += 1
     self.NFTownerToTokenCount[self] += 1
-    self.auction_instance.startAuction(nftID)
+    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(nftID)
+    return True
 
 @external
 @nonreentrant("lock")
 def NFTCheckAuctionEnd(_NFTid: uint256): 
     assert _NFTid < self.NFTidCtr
-    winner: address = self.auction_instance.endAuction(_NFTid)
+    winner: address = OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).endAuction(_NFTid)
     assert winner != empty(address), "Auction not done yet"
     self._transferNFT(self, winner, _NFTid)
 

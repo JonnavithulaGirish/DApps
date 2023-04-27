@@ -1,6 +1,14 @@
 
+struct Auction:
+    beneficiary: address
+    auctionStart: uint256
+    auctionEnd: uint256
+    highestBidder: address
+    highestBid: uint256
+    ended: bool
+
 # External Interfaces
-interface Auction:
+interface OpenAuction:
     def startAuction(_NFTid: uint256): nonpayable
     def bid(_NFTid: uint256): payable
     def endAuction(_NFTid: uint256) -> address: nonpayable
