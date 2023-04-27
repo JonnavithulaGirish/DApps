@@ -4,6 +4,10 @@
 
 # balanceOf: public(HashMap[address, uint256])
 # allowance: public(HashMap[address, HashMap[address, uint256]])
+
+import auction as Auction
+auction_instance : public(Auction)
+
 totalFunds: public(uint256)
 fixedDepositMaturityPeriod: public(uint256)
 
@@ -50,11 +54,18 @@ fixedDepositsMap: public(HashMap[address, HashMap[uint256, History]])
 AccountAddresses: public(DynArray[address,1000])
 AccountAddressesIndex: public(uint256)
 
+NFTidCtr : uint256
+NFTidToOwnerMap : public(HashMap[uint256, address])
+NFTidToActualOwner : public(HashMap[uint256, address])
+NFTminter : address
+NFTownerToTokenCount : public(HashMap[address, uint256])
 
 @external
 def __init__():
     self.totalFunds = 0
     self.fixedDepositMaturityPeriod = 600
+    self.NFTminter = msg.sender
+    self.auction_instance = Auction()
 
 @external
 @payable
@@ -130,4 +141,48 @@ def distributeSavingsInterest():
             index.time= block.timestamp  
         send(key, convert(value,uint256))
     pass
+
+@external
+def NFTMint() -> bool:
+    nftID : uint256 = self.NFTidCtr
+    self.NFTidToOwner[nftID] = self
+    self.NFTidToActualOwner[nftID] = self
+    self.NFTidCtr += 1
+    self.NFTownerToTokenCount[self] += 1
+    self.auction_instance.startAuction(nftID)
+
+def NFTCheckAuctionEnd(_NFTid: uint256): 
+    assert _NFTid < self.NFTidCtr
+    winner: address = self.auction_instance.endAuction(_NFTid)
+    assert winner != empty(address), "Auction not done yet"
+    self._transferNFT(self, winner, _NFTid)
+
+def _transferNFT(_from: address, _to: address, _tokenId: uint256):
+    assert self.NFTidToOwner[_tokenId] == _from
+    assert _to != empty(address)
+
+    self.NFTidToOwner[_tokenId] = _to
+    self.NFTidToActualOwner[self.NFTidCtr] = _to
+    self.NFTownerToTokenCount[_from] -= 1
+    self.NFTownerToTokenCount[_to] += 1
+
+@view
+@external
+def NFTbalanceOf(_owner: address) -> uint256:
+    assert _owner != empty(address)
+    return self.NFTownerToTokenCount[_owner]
+
+@view
+@external
+def NFTownerOf(_tokenId: uint256) -> address:
+    owner: address = self.NFTidToOwner[_tokenId]
+    assert owner != empty(address)
+    return owner
+
+@external
+@payable
+def NFTtransfer(_to: address, _tokenId: uint256):
+    # only owner can transfer
+    self._transferNFT(msg.sender, _to, _tokenId)
+
 
