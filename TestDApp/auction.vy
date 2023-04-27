@@ -15,6 +15,7 @@ AuctionMap : public(HashMap[uint256, Auction])
 
 NFTIDToBidders: public(HashMap[uint256, DynArray[address, 100]])
 
+@external
 def startAuction(_NFTid: uint256):
     self.AuctionMap[_NFTid] = Auction({
         beneficiary: msg.sender,
@@ -39,7 +40,8 @@ def bid(_NFTid: uint256):
         self.NFTIDToBidders[_NFTid].append(msg.sender)
 
 @external
-def endAuction(_NFTid: uint256):
+@nonreentrant("lock")
+def endAuction(_NFTid: uint256) -> address:
     assert block.timestamp >= self.AuctionMap[_NFTid].auctionEnd
     assert not self.AuctionMap[_NFTid].ended
 
@@ -51,9 +53,13 @@ def endAuction(_NFTid: uint256):
 
     send(self.AuctionMap[_NFTid].beneficiary, self.AuctionMap[_NFTid].highestBid)
 
-    for bidder in self.NFTIDToBidders[_NFTid]:
-        pending_amount: uint256 = self.pendingReturns[_NFTid][msg.sender]
-        self.pendingReturns[_NFTid][msg.sender] = 0
-        send(msg.sender, pending_amount)
+    for i in range(100):
+        if self.NFTIDToBidders[_NFTid][i] == empty(address):
+            break
+        bidder: address =  self.NFTIDToBidders[_NFTid][i]
+        if bidder != self.AuctionMap[_NFTid].highestBidder:
+            pending_amount: uint256 = self.pendingReturns[_NFTid][bidder]
+            self.pendingReturns[_NFTid][bidder] = 0
+            send(bidder, pending_amount)
         
     return self.AuctionMap[_NFTid].highestBidder

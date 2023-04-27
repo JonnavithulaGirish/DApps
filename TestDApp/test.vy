@@ -5,8 +5,8 @@
 # balanceOf: public(HashMap[address, uint256])
 # allowance: public(HashMap[address, HashMap[address, uint256]])
 
-import auction as Auction
-auction_instance : public(Auction)
+import auctioninterface as Auction
+auction_instance : Auction
 
 totalFunds: public(uint256)
 fixedDepositMaturityPeriod: public(uint256)
@@ -28,11 +28,13 @@ struct Proposal:
     approved: bool
     approversTotalStake: uint256
     requestMsg: String[128] 
+    NFTid: uint256
     isNotEmpty : bool
-    
 
-PendingProposals: HashMap[uint256, Proposal]
-ProposalApprovalMap: HashMap[uint256, HashMap[address,bool]]
+LoanAccounts: HashMap[address, HashMap[uint256, DynArray[uint256, 12]]]     # loan account address -> [unique loan id -> payment plan]
+
+PendingProposals: HashMap[uint256, Proposal]        # unique loan id -> proposal information
+ProposalApprovalMap: HashMap[uint256, HashMap[address,bool]]    # proposal id -> [stakeholder -> hasApproved]
 
 struct History:
     amount: uint256
@@ -55,7 +57,7 @@ AccountAddresses: public(DynArray[address,1000])
 AccountAddressesIndex: public(uint256)
 
 NFTidCtr : uint256
-NFTidToOwnerMap : public(HashMap[uint256, address])
+NFTidToOwner : public(HashMap[uint256, address])
 NFTidToActualOwner : public(HashMap[uint256, address])
 NFTminter : address
 NFTownerToTokenCount : public(HashMap[address, uint256])
@@ -151,12 +153,15 @@ def NFTMint() -> bool:
     self.NFTownerToTokenCount[self] += 1
     self.auction_instance.startAuction(nftID)
 
+@external
+@nonreentrant("lock")
 def NFTCheckAuctionEnd(_NFTid: uint256): 
     assert _NFTid < self.NFTidCtr
     winner: address = self.auction_instance.endAuction(_NFTid)
     assert winner != empty(address), "Auction not done yet"
     self._transferNFT(self, winner, _NFTid)
 
+@internal
 def _transferNFT(_from: address, _to: address, _tokenId: uint256):
     assert self.NFTidToOwner[_tokenId] == _from
     assert _to != empty(address)
@@ -180,9 +185,6 @@ def NFTownerOf(_tokenId: uint256) -> address:
     return owner
 
 @external
-@payable
 def NFTtransfer(_to: address, _tokenId: uint256):
     # only owner can transfer
     self._transferNFT(msg.sender, _to, _tokenId)
-
-
