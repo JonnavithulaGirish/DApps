@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <%- include('../partials/head'); %>
+</head>
+<body>
+
+<!-- <header>
+  <%- include('../partials/header'); %>
+</header> -->
+
+
+  
+  <%-include('../partials/navBar'); %>
+  <div class="row" style="min-height: 95%;">    
+    <nav class="border-end col-md-2 sidebar navbar-dark bg-dark" id="sidebar-wrapper">
+      <br>
+      <h6 style="color: white; padding-top: 1-px; align-self: auto; text-align: center;">DeFi Accounts</h6>
+      <hr style="color: white; padding: 0px; margin-bottom: 0px;">
+      <hr style="color: white; margin-top: 3px;">
+      <ul class="nav row">
+        <% for(addr of accountAddress) {%>
+          <li class="nav-item" style="text-overflow: ellipsis; overflow-wrap: break-word;">
+            <a class="nav-link" aria-current="page" href="?accountAddr=<%= addr %>" style="text-overflow: ellipsis"><%= addr %></a>
+            <hr style="color: white;">
+          </li>
+        <% } %>
+      </ul>
+    </nav>
+
+    <div class="col-md-10" style="padding-top: 20px;">
+      <!-- <div class="row"> -->
+        <!-- <div class="card"> -->
+          <h4 style="padding: 10px;">Account Summary</h4>
+          <!-- <div class="card-body">
+            <h6 class="card-subtitle mb-2 text-muted">Status:: Healthy</h6>
+            <h6 class="card-subtitle mb-2 text-muted">Role::</h6>
+          </div>
+        </div> -->
+      <!-- </div> -->
+    </div>
+
+  </div>
+
+
+
+
+
+
+<footer>
+  <%- include('../partials/footer'); %>
+</footer>
+
+</body>
+</html>
