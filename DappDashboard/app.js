@@ -19,7 +19,6 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 //Api Calls
 app.get('/', async function (req, res) {
-
     getAccountsAddressIndex().then(data => {
         var promises = []
         for (var i = 0; i < data; i++) {
@@ -38,32 +37,66 @@ app.get('/', async function (req, res) {
                     result[values[value]] = convertToAccount(accounts[count])
                     count += 1
                 }
-                return { "accounts": result, "fixedDepositHistory": [], "accountAddress": values }
+                var address = req.query.address ? req.query.address : values[0]
+                return { "accounts": result, "fixedDepositHistory": [], "accountAddress": values, "account": result[address], "address": address ,"errormsg": req.query.errormsg, "redirected": req.query.redirected}
             }).then((data) => {
                 fixeDepositHisPromise = []
                 if (data["accountAddress"].length > 0) {
-                    for (var i = 0; i < data["accounts"][data["accountAddress"][0]].fixedDepositCounter; i++) {
-                        fixeDepositHisPromise.push(getFixedDepositHistory(data['accountAddress'][0], i))
+                    for (var i = 0; i < data["accounts"][data["address"]].fixedDepositCounter; i++) {
+                        fixeDepositHisPromise.push(getFixedDepositHistory(data["address"], i))
                     }
                     Promise.all(fixeDepositHisPromise).then((fixedDepositHistories) => {
-                        for (var hist in fixedDepositHistories) {
-                            data["fixedDepositHistory"].push(convertToHistory(hist))
-                        }
+                        data["fixedDepositHistory"] = convertToHistory(fixedDepositHistories)
                         return data
                     }).then((finalData) => {
                         //res.send(finalData)
-                        console.log(finalData)
-                        res.render('pages/index', finalData);
+                        console.log(JSON.stringify(finalData))
+                        res.render('pages/index', finalData)
                     })
                 }
                 else {
                     //res.send(data)
-                    res.render('pages/index', data);
+                    res.render('pages/index', data)
                 }
             })
         })
     })
 });
+
+
+app.post('/SavingsDeposit', function(req, res, next){
+    console.log(req.body)
+    DepositAmount(req.body.address,0,req.body.amount).then(data =>{
+        if(!data.errormsg){
+            res.redirect('/?redirected=True&address='+req.body.address);
+        }
+        else{
+            res.redirect('/?redirected=True&address='+req.body.address+'&errormsg='+data.errormsg);
+        }
+    })
+ });
+
+ app.post('/SavingsDeposit', function(req, res, next){
+    DepositAmount(req.body.address,1,req.body.amount,).then(data =>{
+        if(!data.errormsg){
+            res.redirect('/?address='+req.body.address);
+        }
+        else{
+            res.redirect('/?address='+req.body.address+'&errormsg='+data.errormsg);
+        }
+    })
+ });
+
+ app.post('/FixedDeposit', function(req, res, next){
+    DepositAmount(req.body.address,1,req.body.amount,).then(data =>{
+        if(!data.errormsg){
+            res.redirect('/?address='+req.body.address);
+        }
+        else{
+            res.redirect('/?address='+req.body.address+'&errormsg='+data.errormsg);
+        }
+    })
+ });
 
 app.set('port', process.env.PORT || 8000);
 
@@ -96,24 +129,26 @@ function getAccountsAddressIndex() {
 }
 
 async function DepositAmount(accountAddress,type,amount) {
+    // console.log(web3.utils.toWei(amount, 'ether'))
     return new Promise(async (resolve, reject) => {
         try{
             var nounce = await web3.eth.getTransactionCount(accountAddress);
             var txHash = await web3.eth.sendTransaction({
-                to: myContract.options.address,
-                data: myContract.methods.Deposit(type).encodeABI(),
+                to: contract.options.address,
+                data: contract.methods.Deposit(type).encodeABI(),
                 from: accountAddress,
                 gas: 10000000,
                 gasPrice: 0,
-                value: web3.utils.toWei(amount, 'ether'),
+                value: amount,
                 nounce: nounce
             });
             var receipt = await web3.eth.getTransactionReceipt(txHash);
-            resolve(receipt)
+            console.log(receipt)
+            resolve({status: "success"})
         }
         catch(error){
             console.log(error)
-            reject(new Error('Error Depositing money'))
+            resolve({status: "success"})
         }
     })
 }
@@ -123,20 +158,20 @@ function WithdrawAmount(accountAddress, type, amount, fixedDepositIndex=0) {
         try{
             var nounce = await web3.eth.getTransactionCount(accountAddress);
             var txHash = await web3.eth.sendTransaction({
-                to: myContract.options.address,
-                data: myContract.methods.WithDraw(amount, type, fixedDepositIndex).encodeABI(),
+                to: contract.options.address,
+                data: contract.methods.WithDraw(amount, type, fixedDepositIndex).encodeABI(),
                 from: accountAddress,
                 gas: 10000000,
                 gasPrice: 0,
                 value: 0,
                 nounce: nounce
             });
-            var receipt = await web3.eth.getTransactionReceipt(txHash);
-            resolve(receipt)
+            // var receipt = await web3.eth.getTransactionReceipt(txHash);
+            resolve({errormsg: {}, status: "success"})
         }
         catch(error){
             console.log(error)
-            reject(new Error('Error Depositing money'))
+            reject({errormsg: new Error('Error Depositing money'), status: "failure"})
         }
     })
 }
