@@ -47,8 +47,14 @@ struct Proposal:
     requestMsg: String[128] 
     NFTid: uint256
     isNotEmpty : bool
+    uid: uint256
+    hasRepaid: bool
 
-LoanAccounts: HashMap[address, HashMap[uint256, DynArray[uint256, 12]]]     # loan account address -> [unique loan id -> payment plan]
+struct PaymentPlan:
+    amount: uint256
+    time: uint256
+
+LoanAccounts: HashMap[address, HashMap[uint256, DynArray[PaymentPlan, 12]]]     # loan account address -> [unique loan id -> payment plan]
 
 ProposalsMap: HashMap[uint256, Proposal]        # unique loan id -> proposal information
 ProposalCtr : uint256
@@ -217,7 +223,7 @@ def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _co
     self.ProposalCtr += 1
     self.ProposalsMap[_uid] = Proposal({
         recipient: _recipient, amount: _amount, approved: False, currStake: 0, approverList: [],
-        requestMsg: _msg, NFTid: _collateral, isNotEmpty: True
+        requestMsg: _msg, NFTid: _collateral, isNotEmpty: True, uid: _uid, hasRepaid: False
         })
     return _uid
 
@@ -259,10 +265,19 @@ def approveProposal(_uid: uint256):
         totalAmount: decimal = convert(self.ProposalsMap[_uid].amount, decimal)
         perUnit : decimal = totalAmount/12
         for i in range(1, 13):
-            paymentplan.append(perUnit+totalAmount*1.1)
+            paymentplan.append(PaymentPlan({
+                amount: perUnit+totalAmount*1.1,
+                time: block.timestamp + 600*i
+                }))
+
             totalAmount -= perUnit
 
         self.LoanAccounts[self.ProposalsMap[_uid].recipient][_uid] = paymentplan
+        self.NFTidToOwner[self.ProposalsMap[_uid].NFTid] = self
+
+        self.NFTownerToTokenCount[self] += 1
+        self.NFTownerToTokenCount[self.ProposalsMap[_uid].recipient] -= 1
+
         send(self.ProposalsMap[_uid].recipient, self.ProposalsMap[_uid].amount)
     return
 
@@ -270,10 +285,25 @@ def approveProposal(_uid: uint256):
 @payable
 def payLoanInstallment(_proposalid: uint256, _term: uint256):
     assert self.LoanAccounts[msg.sender][_proposalid] != empty(DynArray), "Why service a loan that you have not taken?"
-    assert self.LoanAccounts[msg.sender][_proposalid][_term] == msg.value, "payment plan of term doesnt match"
+    assert self.LoanAccounts[msg.sender][_proposalid][_term].amount == msg.value, "payment plan of term doesnt match"
 
-    self.LoanAccounts[msg.sender][_proposalid][_term] = 0
+    self.LoanAccounts[msg.sender][_proposalid][_term].amount = 0
     return
 
 # TODO checkLoanDefaults
-    
+@external
+def checkLoanDefaults():
+    for adrss in self.AccountAddresses:
+        for proposal in self.Accounts[adrss].loanRequests:
+            ctr : uint256 = 0
+            for pp in self.LoanAccounts[adrss][proposal.uid]:
+                if block.timestamp >= pp.time && pp.amount != 0:
+                    # default
+                    # sell their collateral
+                    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(proposal.NFTid)
+                    self.NFTidToActualOwner[NFTid] = empty(address)
+                elif block.timestamp >= pp.time && pp.amount == 0:
+                    ctr += 1
+            if ctr == 12 and self.ProposalsMap[proposal.uid].hasRepaid == False:
+                self.ProposalsMap[proposal.uid].hasRepaid = True
+                self.NFTidToOwner[proposal.NFTid] = proposal.recipient
