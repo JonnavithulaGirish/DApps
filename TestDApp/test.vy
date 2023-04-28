@@ -82,7 +82,7 @@ NFTownerToTokenCount : public(HashMap[address, uint256])    # Not really needed,
 
 @external
 def __init__():
-    self.fixedDepositMaturityPeriod = 600
+    self.fixedDepositMaturityPeriod = 600           # 10 minutes
     self.ProposalCtr = 0
     self.NFTidCtr = 0
 
@@ -90,7 +90,9 @@ def __init__():
 @payable
 @nonreentrant("lock")
 def CreateAccount():
-    assert self.Accounts[msg.sender].isNotEmpty == False, "Account already exits" 
+    # create a new account on sender's address
+    assert self.Accounts[msg.sender].isNotEmpty == False, "Account already exits"
+    assert msg.value >= 100, "Minimum balance not met"
     newAccount: Account = Account(
         {
             savingBalance : msg.value,
@@ -101,41 +103,53 @@ def CreateAccount():
             fixedDepositCounter: 0
         })
     self.AccountAddresses.append(msg.sender)
-    self.AccountAddressesIndex+=1
+    self.AccountAddressesIndex += 1
     self.Accounts[msg.sender] = newAccount
-    pass
+    return
 
 @external
 @payable
 @nonreentrant("lock")
-def Deposit(_type:uint256):
-    assert self.Accounts[msg.sender].isNotEmpty == True, "Account doesn't exits" 
+def Deposit(_type: uint256):
+    # deposit money into the contract
+    assert self.Accounts[msg.sender].isNotEmpty == True, "Account doesn't exist"
+    assert msg.value > 0, "Cannot deposit 0 funds" 
     if(_type == 0):
+        # savings
         self.Accounts[msg.sender].savingBalance +=  msg.value
         self.Accounts[msg.sender].savingBalanceHistory.append(History({ amount:  msg.value, time: block.timestamp, isDeposit: True }))
     else:
+        # fixed
         self.Accounts[msg.sender].fixedBalance +=  msg.value
         self.fixedDepositsMap[msg.sender][self.Accounts[msg.sender].fixedDepositCounter]= History({ amount:  msg.value, time: block.timestamp, isDeposit: True })
         self.Accounts[msg.sender].fixedDepositCounter += 1
-    pass
+    return
 
 @external
 @nonreentrant("lock")
 def WithDraw(_value : uint256, _type: uint256, _fixedDepositMapIndex: uint256 = empty(uint256)):
-    assert self.Accounts[msg.sender].isNotEmpty == True, "Account doesn't exits" 
+    # withdraw money from contract
+    assert self.Accounts[msg.sender].isNotEmpty == True, "Account doesn't exits"
+    assert _value > 0, "Cannot withdraw 0 funds"
     if(_type == 0):
+        # savings
         assert self.Accounts[msg.sender].savingBalance >= _value, "Account doesn't have enough savings"
         self.Accounts[msg.sender].savingBalanceHistory.append(History({ amount:  _value, time: block.timestamp, isDeposit: False }))
+        self.Accounts[msg.sender].savingBalance -= _value
     else:
-        assert block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time >= self.fixedDepositMaturityPeriod, "The fixed deposit transaction is not Matured yet."
+        # fixed
+        assert block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time >= self.fixedDepositMaturityPeriod, "The fixed deposit transaction has not matured yet."
         assert self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount >= _value, "The fixed deposit transaction doesn't have enough funds."
+
         self.Accounts[msg.sender].fixedBalance -= _value
         self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount -= _value
+        
+        # calculate interest
         pricipal: decimal = convert(_value, decimal)
-        compoundTerms: decimal = convert((block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time)/300, decimal)
-        total : uint256 = convert(pricipal * 1.07 * compoundTerms, uint256)
+        numTerms: decimal = convert((block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time)/300, decimal)
+        total : uint256 = convert(pricipal * 1.07 * numTerms, uint256)      # principal guaranteed to be large enough to not cause underflow
         send(msg.sender, total)
-    pass
+    return
 
 @external
 @nonpayable
