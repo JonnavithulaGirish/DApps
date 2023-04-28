@@ -250,6 +250,7 @@ def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _co
 @nonpayable
 @nonreentrant("lock")
 def approveProposal(_uid: uint256):
+    assert _uid < self.ProposalCtr, "proposal doesn't exist"
     for approver in self.ProposalsMap[_uid].approverList:
         if msg.sender == approver:
             raise "Cannot approve twice!"
@@ -283,7 +284,7 @@ def approveProposal(_uid: uint256):
         
         self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(_uid)
         
-        # create loan account plan
+        # create loan payment plan
         installments : DynArray[PaymentPlan, 12] = []
         totalAmount: decimal = convert(self.ProposalsMap[_uid].amount, decimal)
         perUnit : decimal = totalAmount/12.0
@@ -309,26 +310,32 @@ def approveProposal(_uid: uint256):
 @external
 @payable
 def payLoanInstallment(_proposalid: uint256, _term: uint256):
-    # assert self.LoanAccounts[msg.sender][_proposalid] != convert([],DynArray[PaymentPlan,12]), "Why service a loan that you have not taken?"
-    assert self.LoanAccounts[msg.sender][_proposalid][_term].amount == msg.value, "payment plan of term doesnt match"
+    # payback installment
+    assert _proposalid < self.ProposalCtr, "loan id incorrect"
+    assert _term >= 1 and _term < 13, "incorrect term"
+    assert _proposalid in self.Accounts[msg.sender].loanRequests, "why paying someone else's loan bruh?"
+    assert self.LoanAccounts[msg.sender][_proposalid][_term].amount == msg.value, "payment plan of term doesnt match with sent value"
+    assert self.LoanAccounts[msg.sender][_proposalid][_term].time >= block.timestamp, "already defaulted, cant save your nft now"
 
     self.LoanAccounts[msg.sender][_proposalid][_term].amount = 0
     return
 
-# TODO checkLoanDefaults
 @external
 def checkLoanDefaults():
+    # periodically called to check if someone defaulted their loan
     for adrss in self.AccountAddresses:
         for proposalid in self.Accounts[adrss].loanRequests:
             ctr : uint256 = 0
             for idx in range(12):
                 pp: PaymentPlan = self.LoanAccounts[adrss][proposalid][idx]
                 if block.timestamp >= pp.time and pp.amount != 0:
-                    # default
+                    # this user has defaulted on his loan
                     # sell their collateral
                     OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(self.ProposalsMap[proposalid].NFTid)
                 elif block.timestamp >= pp.time and pp.amount == 0:
                     ctr += 1
+            # if a loan is repaid, reassign NFT back to loan requestor
             if ctr == 12 and self.ProposalsMap[proposalid].hasRepaid == False:
                 self.ProposalsMap[proposalid].hasRepaid = True
-                self.NFTidToOwner[self.ProposalsMap[proposalid].NFTid] = self.ProposalsMap[proposalid].recipient
+                self._transferNFT(self, self.ProposalsMap[proposalid].recipient, self.ProposalsMap[proposalid].NFTid)
+    return
