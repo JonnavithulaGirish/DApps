@@ -121,7 +121,7 @@ def Deposit(_type: uint256):
     else:
         # fixed
         self.Accounts[msg.sender].fixedBalance +=  msg.value
-        self.fixedDepositsMap[msg.sender][self.Accounts[msg.sender].fixedDepositCounter]= History({ amount:  msg.value, time: block.timestamp, isDeposit: True })
+        self.fixedDepositsMap[msg.sender][self.Accounts[msg.sender].fixedDepositCounter] = History({ amount:  msg.value, time: block.timestamp, isDeposit: True })
         self.Accounts[msg.sender].fixedDepositCounter += 1
     return
 
@@ -155,25 +155,27 @@ def WithDraw(_value : uint256, _type: uint256, _fixedDepositMapIndex: uint256 = 
 @nonpayable
 @nonreentrant("lock")
 def getBalance() -> uint256:
+    # get smart contract wei balance, needed?
     return self.balance
 
 @external
 @payable
 @nonreentrant("lock")
 def distributeSavingsInterest():
-    for key in self.AccountAddresses:
-        value: decimal= 0.0
-        for index in self.Accounts[key].savingBalanceHistory:
-            pricipal: decimal = convert(index.amount * 10**18, decimal)
-            compoundTerms: decimal = convert((block.timestamp - index.time)/300, decimal)
-            total: decimal =pricipal * 1.07 * compoundTerms 
-            if(index.isDeposit == True):
-                value+= total
+    # called periodically by web server to distribute savings interest to account holders
+    for adrs in self.AccountAddresses:
+        value: decimal = 0.0
+        for hist in self.Accounts[adrs].savingBalanceHistory:
+            pricipal: decimal = convert(hist.amount, decimal)
+            numTerms: decimal = convert((block.timestamp - hist.time)/300, decimal)
+            total: decimal = pricipal * 1.07 * numTerms 
+            if(hist.isDeposit == True):
+                value += total
             else:
                 value -= total
-            index.time= block.timestamp  
-        send(key, convert(value,uint256))
-    pass
+            hist.time= block.timestamp           # update to avoid repaying interest for the same period again
+        send(adrs, convert(value, uint256))      # distribute interest
+    return
 
 @external
 def NFTMint() -> bool:
