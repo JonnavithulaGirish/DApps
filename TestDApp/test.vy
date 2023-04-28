@@ -178,22 +178,25 @@ def distributeSavingsInterest():
     return
 
 @external
-def NFTMint() -> bool:
+def NFTMint():
+    # create NFT and start auction
     nftID : uint256 = self.NFTidCtr
-    self.NFTidToOwner[nftID] = self
+    self.NFTidToOwner[nftID] = self             # set contract as owner until auction is complete
     self.NFTidToActualOwner[nftID] = self
     self.NFTidCtr += 1
     self.NFTownerToTokenCount[self] += 1
     OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(nftID)
-    return True
+    return
 
 @external
 @nonreentrant("lock")
-def NFTCheckAuctionEnd(_NFTid: uint256): 
+def NFTCheckAuctionEnd(_NFTid: uint256):
+    # check periodically from webserver to identify owner of NFT after auction ends
     assert _NFTid < self.NFTidCtr
     winner: address = OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).endAuction(_NFTid)
     assert winner != empty(address), "Auction not done yet"
     self._transferNFT(self, winner, _NFTid)
+    return
 
 @internal
 def _transferNFT(_from: address, _to: address, _tokenId: uint256):
@@ -204,22 +207,26 @@ def _transferNFT(_from: address, _to: address, _tokenId: uint256):
     self.NFTidToActualOwner[self.NFTidCtr] = _to
     self.NFTownerToTokenCount[_from] -= 1
     self.NFTownerToTokenCount[_to] += 1
+    return
 
 @view
 @external
 def NFTbalanceOf(_owner: address) -> uint256:
     assert _owner != empty(address)
+    # returns # of NFTs owned by _owner, needed?
     return self.NFTownerToTokenCount[_owner]
 
 @view
 @external
 def NFTownerOf(_tokenId: uint256) -> address:
+    # return owner of _tokenid, needed?
     owner: address = self.NFTidToOwner[_tokenId]
     assert owner != empty(address)
     return owner
 
 @external
 def NFTtransfer(_to: address, _tokenId: uint256):
+    assert _tokenId < self.NFTidCtr, "cannot transfer non-existent NFT"
     # only owner can transfer
     self._transferNFT(msg.sender, _to, _tokenId)
 
