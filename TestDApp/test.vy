@@ -61,7 +61,7 @@ struct History:
 struct Account:
     savingBalance : uint256                             # savings account balance
     fixedBalance : uint256                              # fixed account balance = sum of fixed deposits
-    loanRequests: DynArray[Proposal, 100]               # list of loan requests
+    loanRequests: DynArray[uint256, 100]               # list of loan requests
     isNotEmpty: bool                                    # check if Account object is empty
     savingBalanceHistory: DynArray[History, 100]        # savings account transaction history
     fixedDepositCounter: uint256                        # tracks fixed deposits id in fixedDepositsMap
@@ -77,7 +77,6 @@ AccountAddressesIndex: public(uint256)                  # tracks # unique accoun
 # NFT member variables
 NFTidCtr : uint256                                          # tracks unique NFT IDs
 NFTidToOwner : public(HashMap[uint256, address])            # tracks NFT ownership
-NFTidToActualOwner : public(HashMap[uint256, address])      # used to reassign NFT collateral back to debtor after repaying loan
 NFTownerToTokenCount : public(HashMap[address, uint256])    # Not really needed, but tracks # NFT owned by an user
 
 @external
@@ -182,7 +181,6 @@ def NFTMint():
     # create NFT and start auction
     nftID : uint256 = self.NFTidCtr
     self.NFTidToOwner[nftID] = self             # set contract as owner until auction is complete
-    self.NFTidToActualOwner[nftID] = self
     self.NFTidCtr += 1
     self.NFTownerToTokenCount[self] += 1
     OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(nftID)
@@ -204,7 +202,6 @@ def _transferNFT(_from: address, _to: address, _tokenId: uint256):
     assert _to != empty(address)
 
     self.NFTidToOwner[_tokenId] = _to
-    self.NFTidToActualOwner[self.NFTidCtr] = _to
     self.NFTownerToTokenCount[_from] -= 1
     self.NFTownerToTokenCount[_to] += 1
     return
@@ -229,21 +226,25 @@ def NFTtransfer(_to: address, _tokenId: uint256):
     assert _tokenId < self.NFTidCtr, "cannot transfer non-existent NFT"
     # only owner can transfer
     self._transferNFT(msg.sender, _to, _tokenId)
+    return
 
 @external
 @nonpayable
 @nonreentrant("lock")
 def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _collateral: uint256):
+    # submit a loan proposal to the contract
+    assert _recipient != empty(address), "recipient cannot be empty"
+    assert _recipient in self.AccountAddresses, "not an account holder!"
     assert self.NFTidToOwner[_collateral] == msg.sender, "Using someone else's NFT as collateral!!"
     assert _amount > 0, "Can request loan for 0 amount!"
+
     _uid: uint256 = self.ProposalCtr
     self.ProposalCtr += 1
     self.ProposalsMap[_uid] = Proposal({
         recipient: _recipient, amount: _amount, approved: False, currStake: 0, approverList: [],
         requestMsg: _msg, NFTid: _collateral, isNotEmpty: True, uid: _uid, hasRepaid: False
         })
-    # return _uid
-    pass
+    return
 
 @external
 @nonpayable
@@ -255,12 +256,14 @@ def approveProposal(_uid: uint256):
     
     # someone who has a fixed deposit with us can only approve
     flag : bool = False
+    
+    #create stakeHolders list
     stakeHolders: DynArray[address, 100] = []
     totalStake: uint256 = 0
-    for key in self.AccountAddresses:
-        if self.Accounts[key].fixedBalance > 0:
-            stakeHolders.append(key)
-            totalStake += self.Accounts[key].fixedBalance
+    for adrs in self.AccountAddresses:
+        if self.Accounts[adrs].fixedBalance > 0:
+            stakeHolders.append(adrs)
+            totalStake += self.Accounts[adrs].fixedBalance
 
     for stkhldr in stakeHolders:
         if msg.sender == stkhldr:
@@ -272,30 +275,34 @@ def approveProposal(_uid: uint256):
     self.ProposalsMap[_uid].currStake += self.Accounts[msg.sender].fixedBalance
     self.ProposalsMap[_uid].approverList.append(msg.sender)
 
-    if self.ProposalsMap[_uid].currStake*2 > totalStake and self.ProposalsMap[_uid].approved == False:
-        #raw_call(self.ProposalsMap[_uid].recipient, b'', value=self.ProposalsMap[_uid].amount)
+    # loan approved if current approvers' stake > majority of stake
+    if self.ProposalsMap[_uid].currStake * 2 > totalStake and self.ProposalsMap[_uid].approved == False:
         self.ProposalsMap[_uid].approved = True
 
-        # send Funds to recipient
-        self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(self.ProposalsMap[_uid])
+        # send funds to recipient
+        
+        self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(_uid)
+        
         # create loan account plan
-        paymentplan : DynArray[PaymentPlan, 12] = []
+        installments : DynArray[PaymentPlan, 12] = []
         totalAmount: decimal = convert(self.ProposalsMap[_uid].amount, decimal)
         perUnit : decimal = totalAmount/12.0
         for i in range(1, 13):
-            paymentplan.append(PaymentPlan({
-                amount: convert(perUnit+totalAmount*1.1,uint256),
-                time: block.timestamp + convert(600.0*  convert(i,decimal), uint256)
+            installments.append(PaymentPlan({
+                amount: convert(perUnit + totalAmount * 1.1 , uint256),
+                time: block.timestamp + convert(600.0 * convert(i, decimal), uint256)
                 }))
 
             totalAmount -= perUnit
 
-        self.LoanAccounts[self.ProposalsMap[_uid].recipient][_uid] = paymentplan
+        self.LoanAccounts[self.ProposalsMap[_uid].recipient][_uid] = installments
         self.NFTidToOwner[self.ProposalsMap[_uid].NFTid] = self
-
+        
+        # claim collateral
         self.NFTownerToTokenCount[self] += 1
         self.NFTownerToTokenCount[self.ProposalsMap[_uid].recipient] -= 1
 
+        # disburse funds
         send(self.ProposalsMap[_uid].recipient, self.ProposalsMap[_uid].amount)
     return
 
@@ -312,17 +319,16 @@ def payLoanInstallment(_proposalid: uint256, _term: uint256):
 @external
 def checkLoanDefaults():
     for adrss in self.AccountAddresses:
-        for proposal in self.Accounts[adrss].loanRequests:
+        for proposalid in self.Accounts[adrss].loanRequests:
             ctr : uint256 = 0
             for idx in range(12):
-                pp: PaymentPlan = self.LoanAccounts[adrss][proposal.uid][idx]
+                pp: PaymentPlan = self.LoanAccounts[adrss][proposalid][idx]
                 if block.timestamp >= pp.time and pp.amount != 0:
                     # default
                     # sell their collateral
-                    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(proposal.NFTid)
-                    self.NFTidToActualOwner[proposal.NFTid] = empty(address)
+                    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(self.ProposalsMap[proposalid].NFTid)
                 elif block.timestamp >= pp.time and pp.amount == 0:
                     ctr += 1
-            if ctr == 12 and self.ProposalsMap[proposal.uid].hasRepaid == False:
-                self.ProposalsMap[proposal.uid].hasRepaid = True
-                self.NFTidToOwner[proposal.NFTid] = proposal.recipient
+            if ctr == 12 and self.ProposalsMap[proposalid].hasRepaid == False:
+                self.ProposalsMap[proposalid].hasRepaid = True
+                self.NFTidToOwner[self.ProposalsMap[proposalid].NFTid] = self.ProposalsMap[proposalid].recipient
