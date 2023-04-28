@@ -42,15 +42,16 @@ struct Proposal:
     recipient : address
     amount : uint256
     approved: bool
-    approversTotalStake: uint256
+    currStake: uint256
+    approverList: DynArray[address, 100]
     requestMsg: String[128] 
     NFTid: uint256
     isNotEmpty : bool
 
 LoanAccounts: HashMap[address, HashMap[uint256, DynArray[uint256, 12]]]     # loan account address -> [unique loan id -> payment plan]
 
-PendingProposals: HashMap[uint256, Proposal]        # unique loan id -> proposal information
-ProposalApprovalMap: HashMap[uint256, HashMap[address,bool]]    # proposal id -> [stakeholder -> hasApproved]
+ProposalsMap: HashMap[uint256, Proposal]        # unique loan id -> proposal information
+ProposalCtr : uint256
 
 struct History:
     amount: uint256
@@ -83,6 +84,7 @@ def __init__():
     self.totalFunds = 0
     self.fixedDepositMaturityPeriod = 600
     self.NFTminter = msg.sender
+    self.ProposalCtr = 0
 
 @external
 @payable
@@ -204,3 +206,74 @@ def NFTownerOf(_tokenId: uint256) -> address:
 def NFTtransfer(_to: address, _tokenId: uint256):
     # only owner can transfer
     self._transferNFT(msg.sender, _to, _tokenId)
+
+@external
+@nonpayable
+@nonreentrant("lock")
+def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _collateral: uint256):
+    assert NFTidToOwner[_collateral] == msg.sender, "Using someone else's NFT as collateral!!"
+    assert _amount > 0, "Can request loan for 0 amount!"
+    _uid: uint256 = self.ProposalCtr
+    self.ProposalCtr += 1
+    self.ProposalsMap[_uid] = Proposal({
+        recipient: _recipient, amount: _amount, approved: False, currStake: 0, approverList: [],
+        requestMsg: _msg, NFTid: _collateral, isNotEmpty: True
+        })
+    return _uid
+
+@external
+@nonpayable
+@nonreentrant("lock")
+def approveProposal(_uid: uint256):
+    for approver in self.ProposalsMap[_uid].approverList:
+        if msg.sender == approver:
+            raise "Cannot approve twice!"
+    
+    # someone who has a fixed deposit with us can only approve
+    flag : bool = False
+    stakeHolders: DynArray[address, 100]
+    totalStake: uint256 = 0
+    for key in self.AccountAddresses:
+        if self.Accounts[key].fixedBalance > 0:
+            stakeHolders.append(key)
+            totalStake += self.Accounts[key].fixedBalance
+
+    for stkhldr in stakeHolders:
+        if msg.sender == stkhldr:
+            flag = True
+    
+    if flag == False:
+        raise "Not a stake holder, cannot approve!"
+    
+    self.ProposalsMap[_uid].currStake += self.Accounts[msg.sender].fixedBalance
+    self.ProposalsMap[_uid].approverList.append(msg.sender)
+
+    if self.ProposalsMap[_uid].currStake*2 > totalStake and self.ProposalsMap[_uid].approved == False:
+        #raw_call(self.ProposalsMap[_uid].recipient, b'', value=self.ProposalsMap[_uid].amount)
+        self.ProposalsMap[_uid].approved = True
+
+        # send Funds to recipient
+        self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(ProposalsMap[_uid])
+        # create loan account plan
+        paymentplan : DynArray[uint256, 12] = []
+        totalAmount: decimal = convert(self.ProposalsMap[_uid].amount, decimal)
+        perUnit : decimal = totalAmount/12
+        for i in range(1, 13):
+            paymentplan.append(perUnit+totalAmount*1.1)
+            totalAmount -= perUnit
+
+        self.LoanAccounts[self.ProposalsMap[_uid].recipient][_uid] = paymentplan
+        send(self.ProposalsMap[_uid].recipient, self.ProposalsMap[_uid].amount)
+    return
+
+@external
+@payable
+def payLoanInstallment(_proposalid: uint256, _term: uint256):
+    assert self.LoanAccounts[msg.sender][_proposalid] != empty(DynArray), "Why service a loan that you have not taken?"
+    assert self.LoanAccounts[msg.sender][_proposalid][_term] == msg.value, "payment plan of term doesnt match"
+
+    self.LoanAccounts[msg.sender][_proposalid][_term] = 0
+    return
+
+# TODO checkLoanDefaults
+    
