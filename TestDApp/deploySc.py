@@ -3,7 +3,7 @@ from web3 import Web3
 import secrets
 from web3.middleware import geth_poa_middleware
 
-bytecode = open("aution.bytecode", "r").read()
+bytecode = open("test.bytecode", "r").read()
 my_provider = Web3.IPCProvider('/users/Girish/FuseMnt/datadir/geth.ipc')
 w3 =Web3(my_provider)
 w3.middleware_onion.inject(geth_poa_middleware, layer=0)

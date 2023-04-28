@@ -75,9 +75,10 @@ AccountAddressesIndex: public(uint256)                  # tracks # unique accoun
 
 
 # NFT member variables
-NFTidCtr : uint256                                          # tracks unique NFT IDs
+NFTidCtr : public(uint256)                                  # tracks unique NFT IDs
 NFTidToOwner : public(HashMap[uint256, address])            # tracks NFT ownership
 NFTownerToTokenCount : public(HashMap[address, uint256])    # Not really needed, but tracks # NFT owned by an user
+
 
 @external
 def __init__():
@@ -183,7 +184,7 @@ def NFTMint():
     self.NFTidToOwner[nftID] = self             # set contract as owner until auction is complete
     self.NFTidCtr += 1
     self.NFTownerToTokenCount[self] += 1
-    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(nftID)
+    OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).startAuction(nftID)
     return
 
 @external
@@ -191,7 +192,7 @@ def NFTMint():
 def NFTCheckAuctionEnd(_NFTid: uint256):
     # check periodically from webserver to identify owner of NFT after auction ends
     assert _NFTid < self.NFTidCtr
-    winner: address = OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).endAuction(_NFTid)
+    winner: address = OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).endAuction(_NFTid)
     assert winner != empty(address), "Auction not done yet"
     self._transferNFT(self, winner, _NFTid)
     return
@@ -331,7 +332,7 @@ def checkLoanDefaults():
                 if block.timestamp >= pp.time and pp.amount != 0:
                     # this user has defaulted on his loan
                     # sell their collateral
-                    OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(self.ProposalsMap[proposalid].NFTid)
+                    OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).startAuction(self.ProposalsMap[proposalid].NFTid)
                 elif block.timestamp >= pp.time and pp.amount == 0:
                     ctr += 1
             # if a loan is repaid, reassign NFT back to loan requestor
