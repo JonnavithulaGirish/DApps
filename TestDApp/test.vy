@@ -137,7 +137,7 @@ def WithDraw(_value : uint256, _type: uint256, _fixedDepositMapIndex: uint256 = 
         assert self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount >= _value, "The fixed deposit transaction doesn't have enough funds."
         self.Accounts[msg.sender].fixedBalance -= _value
         self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount -= _value
-        pricipal: decimal = convert(_value * 10**18, decimal)
+        pricipal: decimal = convert(_value, decimal)
         compoundTerms: decimal = convert((block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time)/300, decimal)
         total : uint256 = convert(pricipal * 1.07 * compoundTerms, uint256)
         send(msg.sender, total)
@@ -217,7 +217,7 @@ def NFTtransfer(_to: address, _tokenId: uint256):
 @nonpayable
 @nonreentrant("lock")
 def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _collateral: uint256):
-    assert NFTidToOwner[_collateral] == msg.sender, "Using someone else's NFT as collateral!!"
+    assert self.NFTidToOwner[_collateral] == msg.sender, "Using someone else's NFT as collateral!!"
     assert _amount > 0, "Can request loan for 0 amount!"
     _uid: uint256 = self.ProposalCtr
     self.ProposalCtr += 1
@@ -225,7 +225,8 @@ def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _co
         recipient: _recipient, amount: _amount, approved: False, currStake: 0, approverList: [],
         requestMsg: _msg, NFTid: _collateral, isNotEmpty: True, uid: _uid, hasRepaid: False
         })
-    return _uid
+    # return _uid
+    pass
 
 @external
 @nonpayable
@@ -237,7 +238,7 @@ def approveProposal(_uid: uint256):
     
     # someone who has a fixed deposit with us can only approve
     flag : bool = False
-    stakeHolders: DynArray[address, 100]
+    stakeHolders: DynArray[address, 100] = []
     totalStake: uint256 = 0
     for key in self.AccountAddresses:
         if self.Accounts[key].fixedBalance > 0:
@@ -259,15 +260,15 @@ def approveProposal(_uid: uint256):
         self.ProposalsMap[_uid].approved = True
 
         # send Funds to recipient
-        self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(ProposalsMap[_uid])
+        self.Accounts[self.ProposalsMap[_uid].recipient].loanRequests.append(self.ProposalsMap[_uid])
         # create loan account plan
-        paymentplan : DynArray[uint256, 12] = []
+        paymentplan : DynArray[PaymentPlan, 12] = []
         totalAmount: decimal = convert(self.ProposalsMap[_uid].amount, decimal)
-        perUnit : decimal = totalAmount/12
+        perUnit : decimal = totalAmount/12.0
         for i in range(1, 13):
             paymentplan.append(PaymentPlan({
-                amount: perUnit+totalAmount*1.1,
-                time: block.timestamp + 600*i
+                amount: convert(perUnit+totalAmount*1.1,uint256),
+                time: block.timestamp + convert(600.0*  convert(i,decimal), uint256)
                 }))
 
             totalAmount -= perUnit
@@ -284,7 +285,7 @@ def approveProposal(_uid: uint256):
 @external
 @payable
 def payLoanInstallment(_proposalid: uint256, _term: uint256):
-    assert self.LoanAccounts[msg.sender][_proposalid] != empty(DynArray), "Why service a loan that you have not taken?"
+    # assert self.LoanAccounts[msg.sender][_proposalid] != convert([],DynArray[PaymentPlan,12]), "Why service a loan that you have not taken?"
     assert self.LoanAccounts[msg.sender][_proposalid][_term].amount == msg.value, "payment plan of term doesnt match"
 
     self.LoanAccounts[msg.sender][_proposalid][_term].amount = 0
@@ -296,13 +297,14 @@ def checkLoanDefaults():
     for adrss in self.AccountAddresses:
         for proposal in self.Accounts[adrss].loanRequests:
             ctr : uint256 = 0
-            for pp in self.LoanAccounts[adrss][proposal.uid]:
-                if block.timestamp >= pp.time && pp.amount != 0:
+            for idx in range(12):
+                pp: PaymentPlan = self.LoanAccounts[adrss][proposal.uid][idx]
+                if block.timestamp >= pp.time and pp.amount != 0:
                     # default
                     # sell their collateral
                     OpenAuction(0x8340eB33A1483c421d1D2E80488a01523143921B).startAuction(proposal.NFTid)
-                    self.NFTidToActualOwner[NFTid] = empty(address)
-                elif block.timestamp >= pp.time && pp.amount == 0:
+                    self.NFTidToActualOwner[proposal.NFTid] = empty(address)
+                elif block.timestamp >= pp.time and pp.amount == 0:
                     ctr += 1
             if ctr == 12 and self.ProposalsMap[proposal.uid].hasRepaid == False:
                 self.ProposalsMap[proposal.uid].hasRepaid = True

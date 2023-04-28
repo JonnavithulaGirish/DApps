@@ -76,8 +76,9 @@ app.post('/SavingsDeposit', function(req, res, next){
     })
  });
 
- app.post('/SavingsDeposit', function(req, res, next){
-    DepositAmount(req.body.address,1,req.body.amount,).then(data =>{
+
+ app.post('/FixedDeposit', function(req, res, next){
+    DepositAmount(req.body.address,1,req.body.amount).then(data =>{
         if(!data.errormsg){
             res.redirect('/?address='+req.body.address);
         }
@@ -87,8 +88,9 @@ app.post('/SavingsDeposit', function(req, res, next){
     })
  });
 
- app.post('/FixedDeposit', function(req, res, next){
-    DepositAmount(req.body.address,1,req.body.amount,).then(data =>{
+ app.post('/WithDrawFixedDeposit', function(req, res, next){
+    console.log(req.body.address,1,req.body.amount,req.body.id)
+    WithdrawAmount(req.body.address,1,req.body.amount,req.body.id).then(data =>{
         if(!data.errormsg){
             res.redirect('/?address='+req.body.address);
         }
