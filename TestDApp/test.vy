@@ -1,11 +1,11 @@
-# from vyper.interfaces import ERC20
+# Our main contract that handles 
+# 1. Setting up an savings account
+# 2. Start a fixed deposit
+# 3. Purchase NFT through an auction
+# 4. Request a loan proposal 
 
-# implements: ERC20
-
-# balanceOf: public(HashMap[address, uint256])
-# allowance: public(HashMap[address, HashMap[address, uint256]])
-
-# import auctioninterface as OpenAuction
+# Auction interface for the NFT marketplace
+# check auction.vy
 struct Auction:
     beneficiary: address
     auctionStart: uint256
@@ -22,75 +22,69 @@ interface OpenAuction:
     def AuctionMap(arg0: uint256) -> Auction: view
     def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
 
-#auction_instance : public(OpenAuction)
-
-totalFunds: public(uint256)
+# Time until a fixed deposit matures
 fixedDepositMaturityPeriod: public(uint256)
 
-# TODO add state that tracks proposals here
-event Transfer:
-    sender: indexed(address)
-    receiver: indexed(address)
-    value: uint256
-
-event Approval:
-    owner: indexed(address)
-    spender: indexed(address)
-    value: uint256
-
+# Loan proposal template
 struct Proposal:
-    recipient : address
-    amount : uint256
-    approved: bool
-    currStake: uint256
-    approverList: DynArray[address, 100]
-    requestMsg: String[128] 
-    NFTid: uint256
-    isNotEmpty : bool
-    uid: uint256
-    hasRepaid: bool
+    recipient : address     # loan requestor
+    amount : uint256        # loan amount
+    approved: bool          # has the proposal been approved?
+    currStake: uint256      # current stake of acceptors
+    approverList: DynArray[address, 100]    # list of approvers
+    requestMsg: String[128]     # special message to approvers to accept loan
+    NFTid: uint256          # ID of the NFT used as collateral
+    isNotEmpty : bool       # check if proposal object is empty
+    uid: uint256            # loan proposal's unique id
+    hasRepaid: bool         # has the requestor repaid the loan?
 
+# Contains loan amount(with interest) to be repaid by time (deadline)
 struct PaymentPlan:
     amount: uint256
     time: uint256
 
-LoanAccounts: HashMap[address, HashMap[uint256, DynArray[PaymentPlan, 12]]]     # loan account address -> [unique loan id -> payment plan]
+# Loan must be repaid in 12 installments.
+# Below hashmap tracks installments of all the loans of a particular user
+LoanAccounts: HashMap[address, HashMap[uint256, DynArray[PaymentPlan, 12]]]     # loan account address -> [unique loan proposal id -> payment plan]
 
+# Below variables track the issued loan proposals
 ProposalsMap: HashMap[uint256, Proposal]        # unique loan id -> proposal information
-ProposalCtr : uint256
+ProposalCtr : uint256                           # generates unique loan id
 
+# transaction history
 struct History:
-    amount: uint256
-    time: uint256
-    isDeposit : bool
+    amount: uint256     # transacted amount
+    time: uint256       # timestamp of transaction
+    isDeposit : bool    # deposit/withdrawal?
 
+# the account template
 struct Account:
-    savingBalance : uint256
-    fixedBalance : uint256
-    loanRequests: DynArray[Proposal, 100]
-    isNotEmpty: bool
-    savingBalanceHistory: DynArray[History, 100]
-    fixedDepositCounter: uint256
+    savingBalance : uint256                             # savings account balance
+    fixedBalance : uint256                              # fixed account balance = sum of fixed deposits
+    loanRequests: DynArray[Proposal, 100]               # list of loan requests
+    isNotEmpty: bool                                    # check if Account object is empty
+    savingBalanceHistory: DynArray[History, 100]        # savings account transaction history
+    fixedDepositCounter: uint256                        # tracks fixed deposits id in fixedDepositsMap
 
-Accounts: public(HashMap[address, Account])
+Accounts: public(HashMap[address, Account])             # list of accounts created on this smart contract
 
-fixedDepositsMap: public(HashMap[address, HashMap[uint256, History]])
+fixedDepositsMap: public(HashMap[address, HashMap[uint256, History]])   # account address -> fixed deposit id -> transcation history
 
-AccountAddresses: public(DynArray[address,1000])
-AccountAddressesIndex: public(uint256)
+AccountAddresses: public(DynArray[address,1000])        # list of account addresses, used to iterate Accounts hashmap
+AccountAddressesIndex: public(uint256)                  # tracks # unique accounts, needed?       
 
-NFTidCtr : uint256
-NFTidToOwner : public(HashMap[uint256, address])
-NFTidToActualOwner : public(HashMap[uint256, address])
-NFTminter : address
-NFTownerToTokenCount : public(HashMap[address, uint256])
+
+# NFT member variables
+NFTidCtr : uint256                                          # tracks unique NFT IDs
+NFTidToOwner : public(HashMap[uint256, address])            # tracks NFT ownership
+NFTidToActualOwner : public(HashMap[uint256, address])      # used to reassign NFT collateral back to debtor after repaying loan
+NFTownerToTokenCount : public(HashMap[address, uint256])    # Not really needed, but tracks # NFT owned by an user
 
 @external
 def __init__():
-    self.totalFunds = 0
     self.fixedDepositMaturityPeriod = 600
-    self.NFTminter = msg.sender
     self.ProposalCtr = 0
+    self.NFTidCtr = 0
 
 @external
 @payable
