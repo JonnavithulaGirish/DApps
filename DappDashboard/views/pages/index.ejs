@@ -166,9 +166,21 @@
                           <input type="text" class="form-control" id="AmountField" name="amount" placeholder="Enter Amount">
                         </div>
                       </div>
-                      <div class="form-group">
-                        <label for="ReasonField">Amount</label>
-                        <input type="text" class="form-control" id="ReasonField" name="reason" placeholder="Reason for loan?">
+                      <div class="row">
+                        <div class="form-group col-6">
+                          <label for="ReasonField">Amount</label>
+                          <input type="text" class="form-control" id="ReasonField" name="reason" placeholder="Reason for loan?">
+                        </div>
+                        <div class="form-group col-6">
+                          <label for="collateralIdField">NFT collateral Id</label>
+                          <select class="form-control" id="collateralIdField" name="collateralId">
+                            <% for(nft in NFTs) {%>
+                              <%if(NFTs[nft].highestBidder == address && NFTs[nft].ended) {%>
+                                <option><%=nft%></option>
+                              <%}%>
+                            <%}%>
+                          </select>
+                        </div>
                       </div>
                       <br>
                       <button type="submit" class="btn btn-primary">Raise Reuquest</button>
@@ -179,7 +191,7 @@
             </div>
 
             <h4 style="padding: 10px;">Withdraw/Approvals</h4>
-            <div class="row" style="padding: 5px;">
+            <div class="row" style="padding: 5px; min-height: 350px !important;">
               <div class="col" style="padding: 5px;">
                 <div class="card" style="height:100%;">
                   <div class="card-body p-3">
@@ -194,10 +206,26 @@
                           <div class="carousel-item ">
                               <div class="d-block w-100">
                                   <h5>Fixed Deposit</h5>
-                                  <div>TransactionId: <%= hist %></div>
-                                  <div>Amount: <%= fixedDepositHistory[hist].amount %></div>
-                                  <div>Time: <%= fixedDepositHistory[hist].time %></div>
-                                  <div>Is Mature: <%= Date.now()/1000- fixedDepositHistory[hist].time > 600  %></div>
+                                  <div class="row">
+                                    <div class="col-6">
+                                      <label>TransactionId</label>
+                                      <%= hist %>
+                                    </div>
+                                    <div class="col-6">
+                                      <label>Amount</label>
+                                      <%= fixedDepositHistory[hist].amount %>
+                                    </div>
+                                  </div>
+                                  <div class="row">
+                                    <div class="col-6">
+                                      <label>Time</label>
+                                      <%= fixedDepositHistory[hist].time %>
+                                    </div>
+                                    <div class="col-6">
+                                      <label>Is Mature</label>
+                                      <%= Date.now()/1000- fixedDepositHistory[hist].time > 600  %>
+                                    </div>
+                                  </div>
                                   <form action="/WithDrawFixedDeposit" method="post">
                                     <div class="row">
                                       <div class="form-group col-4">
