@@ -6,6 +6,15 @@
 
 # Auction interface for the NFT marketplace
 # check auction.vy
+
+event Transfer:
+    amount : uint256
+    depositType: uint256
+    index: uint256
+
+event myString:
+    message : String[100]
+
 struct Auction:
     beneficiary: address
     auctionStart: uint256
@@ -13,14 +22,15 @@ struct Auction:
     highestBidder: address
     highestBid: uint256
     ended: bool
+    biddersCtr: uint256
 
-interface OpenAuction:
-    def startAuction(_NFTid: uint256): nonpayable
-    def bid(_NFTid: uint256): payable
-    def endAuction(_NFTid: uint256) -> address: nonpayable
-    def pendingReturns(arg0: uint256, arg1: address) -> uint256: view
-    def AuctionMap(arg0: uint256) -> Auction: view
-    def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
+# interface OpenAuction:
+#     def startAuction(_NFTid: uint256): nonpayable
+#     def bid(_NFTid: uint256): payable
+#     def endAuction(_NFTid: uint256) -> address: nonpayable
+#     def pendingReturns(arg0: uint256, arg1: address) -> uint256: view
+#     def AuctionMap(arg0: uint256) -> Auction: view
+#     def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
 
 # Time until a fixed deposit matures
 fixedDepositMaturityPeriod: public(uint256)
@@ -45,11 +55,11 @@ struct PaymentPlan:
 
 # Loan must be repaid in 12 installments.
 # Below hashmap tracks installments of all the loans of a particular user
-LoanAccounts: HashMap[address, HashMap[uint256, DynArray[PaymentPlan, 12]]]     # loan account address -> [unique loan proposal id -> payment plan]
+LoanAccounts: public(HashMap[address, HashMap[uint256, DynArray[PaymentPlan, 12]]])     # loan account address -> [unique loan proposal id -> payment plan]
 
 # Below variables track the issued loan proposals
-ProposalsMap: HashMap[uint256, Proposal]        # unique loan id -> proposal information
-ProposalCtr : uint256                           # generates unique loan id
+ProposalsMap: public(HashMap[uint256, Proposal])        # unique loan id -> proposal information
+ProposalCtr : public(uint256)                       # generates unique loan id
 
 # transaction history
 struct History:
@@ -78,6 +88,16 @@ AccountAddressesIndex: public(uint256)                  # tracks # unique accoun
 NFTidCtr : public(uint256)                                  # tracks unique NFT IDs
 NFTidToOwner : public(HashMap[uint256, address])            # tracks NFT ownership
 NFTownerToTokenCount : public(HashMap[address, uint256])    # Not really needed, but tracks # NFT owned by an user
+
+
+# tracks refunds for non-winners
+pendingReturns: public(HashMap[uint256, HashMap[address, uint256]])
+
+# list of submitted auctions, NFTID to auction template
+AuctionMap : public(HashMap[uint256, Auction])
+
+# List of bidders in a particular auction
+NFTIDToBidders: public(HashMap[uint256, DynArray[address, 100]])
 
 
 @external
@@ -126,6 +146,7 @@ def Deposit(_type: uint256):
     return
 
 @external
+@payable
 @nonreentrant("lock")
 def WithDraw(_value : uint256, _type: uint256, _fixedDepositMapIndex: uint256 = empty(uint256)):
     # withdraw money from contract
@@ -138,22 +159,30 @@ def WithDraw(_value : uint256, _type: uint256, _fixedDepositMapIndex: uint256 = 
         self.Accounts[msg.sender].savingBalance -= _value
     else:
         # fixed
-        assert block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time >= self.fixedDepositMaturityPeriod, "The fixed deposit transaction has not matured yet."
+        log myString("In fixed deposit logic -a")
+        # assert block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time >= self.fixedDepositMaturityPeriod, "The fixed deposit transaction has not matured yet."
+        log myString("In fixed deposit logic -b")
         assert self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount >= _value, "The fixed deposit transaction doesn't have enough funds."
-
+        log myString("In fixed deposit logic -c")
         self.Accounts[msg.sender].fixedBalance -= _value
+        log myString("In fixed deposit logic -d")
         self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].amount -= _value
+        log myString("In fixed deposit logic -e")
         
         # calculate interest
         pricipal: decimal = convert(_value, decimal)
+        log myString("In fixed deposit logic -f")
+        log Transfer(_value, _type, _fixedDepositMapIndex)
         numTerms: decimal = convert((block.timestamp - self.fixedDepositsMap[msg.sender][_fixedDepositMapIndex].time)/300, decimal)
-        total : uint256 = convert(pricipal * 1.07 * numTerms, uint256)      # principal guaranteed to be large enough to not cause underflow
-        send(msg.sender, total)
+        log myString("In fixed deposit logic -g")
+        total : decimal = pricipal * 1.07 * numTerms    # principal guaranteed to be large enough to not cause underflow
+        log myString("In fixed deposit logic -h")
+        send(msg.sender, convert(total,uint256))
+        log myString("In fixed deposit logic -i")
     return
 
 @external
 @nonpayable
-@nonreentrant("lock")
 def getBalance() -> uint256:
     # get smart contract wei balance, needed?
     return self.balance
@@ -168,7 +197,7 @@ def distributeSavingsInterest():
         for hist in self.Accounts[adrs].savingBalanceHistory:
             pricipal: decimal = convert(hist.amount, decimal)
             numTerms: decimal = convert((block.timestamp - hist.time)/300, decimal)
-            total: decimal = pricipal * 1.07 * numTerms 
+            total: decimal = pricipal * .07 * numTerms 
             if(hist.isDeposit == True):
                 value += total
             else:
@@ -178,26 +207,31 @@ def distributeSavingsInterest():
     return
 
 @external
+@payable
 def NFTMint():
     # create NFT and start auction
     nftID : uint256 = self.NFTidCtr
     self.NFTidToOwner[nftID] = self             # set contract as owner until auction is complete
     self.NFTidCtr += 1
     self.NFTownerToTokenCount[self] += 1
-    OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).startAuction(nftID)
+    self.startAuction(nftID)
     return
 
 @external
+@payable
 @nonreentrant("lock")
 def NFTCheckAuctionEnd(_NFTid: uint256):
     # check periodically from webserver to identify owner of NFT after auction ends
-    assert _NFTid < self.NFTidCtr
-    winner: address = OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).endAuction(_NFTid)
-    assert winner != empty(address), "Auction not done yet"
+    assert _NFTid < self.NFTidCtr , "modda kudu"
+    winner: address = self.endAuction(_NFTid)
+    # assert winner != empty(address), "Auction not done yet"
+    if(winner == empty(address)):
+        return
     self._transferNFT(self, winner, _NFTid)
     return
 
 @internal
+@payable
 def _transferNFT(_from: address, _to: address, _tokenId: uint256):
     assert self.NFTidToOwner[_tokenId] == _from
     assert _to != empty(address)
@@ -223,6 +257,7 @@ def NFTownerOf(_tokenId: uint256) -> address:
     return owner
 
 @external
+@payable
 def NFTtransfer(_to: address, _tokenId: uint256):
     assert _tokenId < self.NFTidCtr, "cannot transfer non-existent NFT"
     # only owner can transfer
@@ -230,7 +265,7 @@ def NFTtransfer(_to: address, _tokenId: uint256):
     return
 
 @external
-@nonpayable
+@payable
 @nonreentrant("lock")
 def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _collateral: uint256):
     # submit a loan proposal to the contract
@@ -248,7 +283,7 @@ def createProposal(_recipient: address, _amount: uint256, _msg: String[128], _co
     return
 
 @external
-@nonpayable
+@payable
 @nonreentrant("lock")
 def approveProposal(_uid: uint256):
     assert _uid < self.ProposalCtr, "proposal doesn't exist"
@@ -322,6 +357,7 @@ def payLoanInstallment(_proposalid: uint256, _term: uint256):
     return
 
 @external
+@payable
 def checkLoanDefaults():
     # periodically called to check if someone defaulted their loan
     for adrss in self.AccountAddresses:
@@ -332,7 +368,7 @@ def checkLoanDefaults():
                 if block.timestamp >= pp.time and pp.amount != 0:
                     # this user has defaulted on his loan
                     # sell their collateral
-                    OpenAuction(0xD022CDCdf2A917564faad8DdB83F47636583f44b).startAuction(self.ProposalsMap[proposalid].NFTid)
+                    self.startAuction(self.ProposalsMap[proposalid].NFTid)
                 elif block.timestamp >= pp.time and pp.amount == 0:
                     ctr += 1
             # if a loan is repaid, reassign NFT back to loan requestor
@@ -340,3 +376,66 @@ def checkLoanDefaults():
                 self.ProposalsMap[proposalid].hasRepaid = True
                 self._transferNFT(self, self.ProposalsMap[proposalid].recipient, self.ProposalsMap[proposalid].NFTid)
     return
+
+
+
+@internal
+@payable
+def startAuction(_NFTid: uint256):
+    # start aution on _NFTid
+    self.AuctionMap[_NFTid] = Auction({
+        beneficiary: msg.sender,
+        auctionStart: block.timestamp,
+        auctionEnd: block.timestamp + 600,        # ends 10 mins after start time
+        highestBidder: empty(address),            # noone has bid yet
+        highestBid: 0,
+        ended: False,
+        biddersCtr: 0
+    })
+
+@external
+@payable
+def bid(_NFTid: uint256):
+    # bid for _NFTid
+    assert block.timestamp >= self.AuctionMap[_NFTid].auctionStart
+    assert block.timestamp < self.AuctionMap[_NFTid].auctionEnd
+    assert msg.value > self.AuctionMap[_NFTid].highestBid
+    # track refund of prev highest bidder
+    self.pendingReturns[_NFTid][self.AuctionMap[_NFTid].highestBidder] += self.AuctionMap[_NFTid].highestBid
+    self.AuctionMap[_NFTid].highestBidder = msg.sender
+    self.AuctionMap[_NFTid].highestBid = msg.value
+
+    if msg.sender not in self.NFTIDToBidders[_NFTid]:
+        self.NFTIDToBidders[_NFTid].append(msg.sender)
+        self.AuctionMap[_NFTid].biddersCtr += 1
+
+@internal
+@payable
+def endAuction(_NFTid: uint256) -> address:
+    # assert block.timestamp >= self.AuctionMap[_NFTid].auctionEnd, "Auction Still in progress"
+    # if block.timestamp < self.AuctionMap[_NFTid].auctionEnd:
+    #     return empty(address)
+    assert not self.AuctionMap[_NFTid].ended, "Auction already ended"
+
+    if self.AuctionMap[_NFTid].highestBidder == empty(address):
+        self.AuctionMap[_NFTid].auctionEnd += 600
+        return empty(address)
+
+    self.AuctionMap[_NFTid].ended = True
+
+    send(self.AuctionMap[_NFTid].beneficiary, self.AuctionMap[_NFTid].highestBid)
+
+    # refund non-winners
+    for i in range(100):
+        # hack to avoid a random vyper error not allowing to iterate over array :/
+        if i >= self.AuctionMap[_NFTid].biddersCtr:
+            break
+        
+        bidder: address =  self.NFTIDToBidders[_NFTid][i]
+        if bidder != self.AuctionMap[_NFTid].highestBidder:
+            pending_amount: uint256 = self.pendingReturns[_NFTid][bidder]
+            self.pendingReturns[_NFTid][bidder] = 0
+            send(bidder, pending_amount)
+    
+    # return winner so that main contract can transfer the NFT
+    return self.AuctionMap[_NFTid].highestBidder

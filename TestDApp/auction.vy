@@ -1,22 +1,23 @@
 # Open Auction
 # Adapted from https://docs.vyperlang.org/en/stable/vyper-by-example.html
-struct Auction:
-    beneficiary: address        # who gets funds at the end of auction, basically our main contract
-    auctionStart: uint256       # auction start time
-    auctionEnd: uint256         # auction end time, bidders typically bid within this time
-    highestBidder: address      # current highest bidder of the auction
-    highestBid: uint256         # highest bidder's bid
-    ended: bool                 # has the auction ended?
+# struct Auction:
+#     beneficiary: address        # who gets funds at the end of auction, basically our main contract
+#     auctionStart: uint256       # auction start time
+#     auctionEnd: uint256         # auction end time, bidders typically bid within this time
+#     highestBidder: address      # current highest bidder of the auction
+#     highestBid: uint256         # highest bidder's bid
+#     ended: bool                 # has the auction ended?
+#     biddersCtr : uint256        # number of bidders for current Auction
 
-interface OpenAuction:
-    def startAuction(_NFTid: uint256): nonpayable
-    def bid(_NFTid: uint256): payable
-    def endAuction(_NFTid: uint256) -> address: nonpayable
-    def pendingReturns(arg0: uint256, arg1: address) -> uint256: view
-    def AuctionMap(arg0: uint256) -> Auction: view
-    def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
+# interface OpenAuction:
+#     def startAuction(_NFTid: uint256): nonpayable
+#     def bid(_NFTid: uint256): payable
+#     def endAuction(_NFTid: uint256) -> address: nonpayable
+#     def pendingReturns(arg0: uint256, arg1: address) -> uint256: view
+#     def AuctionMap(arg0: uint256) -> Auction: view
+#     def NFTIDToBidders(arg0: uint256, arg1: uint256) -> address: view
 
-implements: OpenAuction
+# implements: OpenAuction
 
 # tracks refunds for non-winners
 pendingReturns: public(HashMap[uint256, HashMap[address, uint256]])
@@ -28,6 +29,7 @@ AuctionMap : public(HashMap[uint256, Auction])
 NFTIDToBidders: public(HashMap[uint256, DynArray[address, 100]])
 
 @external
+@payable
 def startAuction(_NFTid: uint256):
     # start aution on _NFTid
     self.AuctionMap[_NFTid] = Auction({
@@ -36,7 +38,8 @@ def startAuction(_NFTid: uint256):
         auctionEnd: block.timestamp + 600,        # ends 10 mins after start time
         highestBidder: empty(address),            # noone has bid yet
         highestBid: 0,
-        ended: False
+        ended: False,
+        biddersCtr: 0
     })
 
 @external
@@ -53,12 +56,14 @@ def bid(_NFTid: uint256):
 
     if msg.sender not in self.NFTIDToBidders[_NFTid]:
         self.NFTIDToBidders[_NFTid].append(msg.sender)
+        self.AuctionMap[_NFTid].biddersCtr += 1
 
 @external
+@payable
 @nonreentrant("lock")
 def endAuction(_NFTid: uint256) -> address:
-    assert block.timestamp >= self.AuctionMap[_NFTid].auctionEnd
-    assert not self.AuctionMap[_NFTid].ended
+    assert block.timestamp >= self.AuctionMap[_NFTid].auctionEnd, "Auction Still in progress"
+    assert not self.AuctionMap[_NFTid].ended, "Auction already ended"
 
     if self.AuctionMap[_NFTid].highestBidder == empty(address):
         self.AuctionMap[_NFTid].auctionEnd += 600
@@ -71,7 +76,7 @@ def endAuction(_NFTid: uint256) -> address:
     # refund non-winners
     for i in range(100):
         # hack to avoid a random vyper error not allowing to iterate over array :/
-        if self.NFTIDToBidders[_NFTid][i] == empty(address):
+        if i >= self.AuctionMap[_NFTid].biddersCtr:
             break
         
         bidder: address =  self.NFTIDToBidders[_NFTid][i]
